@@ -1,0 +1,9 @@
+name = "DisjunctiveDifferentiableLayers"
+uuid = "27dd0706-e170-4de9-a444-9fe7975d9944"
+authors = ["Your Name <your.email@example.com>"]
+version = "0.1.0"
+
+[deps]
+
+[compat]
+julia = "1.10"
