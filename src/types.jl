@@ -39,20 +39,76 @@ end
 
 
 """
+    LinearConstraint(a, sense, b)
+
+A scalar affine constraint of the form
+
+    a' * y <= b
+    a' * y >= b
+    a' * y == b
+
+where `sense` is one of `<=`, `>=`, or `==`.
+"""
+struct LinearConstraint
+    a::Vector{Float64}
+    sense::Symbol
+    b::Float64
+
+    function LinearConstraint(a::AbstractVector{<:Real}, sense::Symbol, b::Real)
+        sense in (:<=, :>=, :(==)) ||
+            throw(ArgumentError("sense must be one of :<=, :>=, or :(==)."))
+        return new(Float64.(collect(a)), sense, Float64(b))
+    end
+end
+
+
+"""
+    Disjunction(disjuncts)
+
+A disjunction represented as a list of disjuncts.
+
+Each disjunct is a vector of `LinearConstraint`s. For example, a two-way
+disjunction has the form
+
+    Disjunction([
+        [constraint_1, constraint_2],
+        [constraint_3, constraint_4],
+    ])
+"""
+struct Disjunction
+    disjuncts::Vector{Vector{LinearConstraint}}
+
+    function Disjunction(disjuncts::Vector{Vector{LinearConstraint}})
+        isempty(disjuncts) && throw(ArgumentError("A disjunction must contain at least one disjunct."))
+        return new(disjuncts)
+    end
+end
+
+
+"""
     DisjunctiveModel(n_outputs)
 
 Container for user-defined JuMP-like disjunctive constraints.
-
-At this stage, this stores only metadata. Later it will store variables,
-ordinary constraints, disjunctions, bounds, and canonicalized convex-hull data.
 """
 mutable struct DisjunctiveModel
     n_outputs::Int
+    lb::Vector{Float64}
+    ub::Vector{Float64}
+    constraints::Vector{LinearConstraint}
+    disjunctions::Vector{Disjunction}
     metadata::Dict{Symbol, Any}
 
     function DisjunctiveModel(n_outputs::Integer)
         n_outputs > 0 || throw(ArgumentError("n_outputs must be positive."))
-        return new(Int(n_outputs), Dict{Symbol, Any}())
+        n = Int(n_outputs)
+        return new(
+            n,
+            fill(-Inf, n),
+            fill(Inf, n),
+            LinearConstraint[],
+            Disjunction[],
+            Dict{Symbol, Any}(),
+        )
     end
 end
 
