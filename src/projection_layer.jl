@@ -1,3 +1,5 @@
+import MathOptInterface as MOI
+
 """
     DisjunctiveProjectionLayer(model; mode = :dnf_qp, gradient = :diffopt, solver = nothing, kwargs...)
 
@@ -38,9 +40,19 @@ Placeholder call overload.
 The actual projection implementation will be added later.
 """
 function (layer::DisjunctiveProjectionLayer)(yhat)
+    result = project(
+        layer.model,
+        yhat;
+        solver = layer.config.solver,
+    )
+
+    if result.status == MOI.OPTIMAL
+        return result.y
+    end
+
     if layer.config.fallback == :identity
-        return yhat
+        return Float64.(collect(yhat))
     else
-        error("Projection call is not implemented yet.")
+        error("Projection failed with status $(result.status).")
     end
 end

@@ -252,3 +252,15 @@ struct ConvexHullForm
     global_constraints::Vector{LinearConstraint}
     scenarios::Vector{ConvexHullScenario}
 end
+
+"""
+    ProjectionResult
+
+Result returned by the projection backend.
+"""
+struct ProjectionResult
+    y::Vector{Float64}
+    gamma::Vector{Float64}
+    status::Any
+    model::Any
+end

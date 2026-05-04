@@ -5,6 +5,8 @@ include("utils.jl")
 include("modeling.jl")
 include("standard_form.jl")
 include("convex_hull.jl")
+include("projection_backend.jl")
+include("differentiation.jl")
 include("projection_layer.jl")
 
 export DisjunctiveModel
@@ -31,5 +33,9 @@ export convex_hull_form
 export num_scenarios
 
 export projection_mode
+
+export ProjectionResult
+export project
+export build_projection_model
 
 end
