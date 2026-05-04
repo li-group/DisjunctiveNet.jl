@@ -127,3 +127,128 @@ struct DisjunctiveProjectionLayer
         return new(model, config)
     end
 end
+
+"""
+    CanonicalConstraint(A, b)
+
+Canonical linear inequality of the form
+
+    A * y <= b
+
+where `A` is a matrix and `b` is a vector.
+"""
+struct CanonicalConstraint
+    A::Matrix{Float64}
+    b::Vector{Float64}
+
+    function CanonicalConstraint(A::AbstractMatrix{<:Real}, b::AbstractVector{<:Real})
+        size(A, 1) == length(b) ||
+            throw(DimensionMismatch("Number of rows in A must match length of b."))
+        return new(Matrix{Float64}(A), Float64.(collect(b)))
+    end
+end
+
+
+"""
+    CanonicalDisjunction(disjuncts)
+
+Canonical disjunction represented as a vector of canonical inequality systems.
+
+Each disjunct has the form
+
+    A_i * y <= b_i
+"""
+struct CanonicalDisjunction
+    disjuncts::Vector{CanonicalConstraint}
+
+    function CanonicalDisjunction(disjuncts::Vector{CanonicalConstraint})
+        isempty(disjuncts) &&
+            throw(ArgumentError("A canonical disjunction must contain at least one disjunct."))
+        return new(disjuncts)
+    end
+end
+
+
+"""
+    StandardDisjunctiveModel
+
+Internal standardized representation of a `DisjunctiveModel`.
+
+Unlike a full canonical inequality form, this preserves the original constraint
+sense `:<=`, `:>=`, or `:(==)` to avoid introducing unnecessary constraints.
+"""
+struct StandardDisjunctiveModel
+    n_outputs::Int
+    lb::Vector{Float64}
+    ub::Vector{Float64}
+    global_constraints::Vector{LinearConstraint}
+    disjunctions::Vector{Disjunction}
+
+    function StandardDisjunctiveModel(
+        n_outputs::Integer,
+        lb::AbstractVector{<:Real},
+        ub::AbstractVector{<:Real},
+        global_constraints::Vector{LinearConstraint},
+        disjunctions::Vector{Disjunction},
+    )
+        n = Int(n_outputs)
+
+        length(lb) == n ||
+            throw(DimensionMismatch("Lower bound length must be $(n)."))
+
+        length(ub) == n ||
+            throw(DimensionMismatch("Upper bound length must be $(n)."))
+
+        for constraint in global_constraints
+            length(constraint.a) == n ||
+                throw(DimensionMismatch("Global constraint dimension must be $(n)."))
+        end
+
+        for disjunction in disjunctions
+            for disjunct in disjunction.disjuncts
+                for constraint in disjunct
+                    length(constraint.a) == n ||
+                        throw(DimensionMismatch("Disjunct constraint dimension must be $(n)."))
+                end
+            end
+        end
+
+        return new(
+            n,
+            Float64.(collect(lb)),
+            Float64.(collect(ub)),
+            copy(global_constraints),
+            copy(disjunctions),
+        )
+    end
+end
+
+
+"""
+    ConvexHullScenario
+
+One scenario in the convex-hull expansion.
+
+A scenario corresponds to choosing exactly one disjunct from each disjunction.
+"""
+struct ConvexHullScenario
+    choices::Vector{Int}
+    local_constraints::Vector{LinearConstraint}
+end
+
+
+"""
+    ConvexHullForm
+
+Convex-hull scenario expansion of a standardized disjunctive model.
+
+Global constraints are stored separately and should be copied into every
+scenario when constructing the JuMP/DiffOpt projection model.
+"""
+struct ConvexHullForm
+    n_outputs::Int
+    lb::Vector{Float64}
+    ub::Vector{Float64}
+    global_constraints::Vector{LinearConstraint}
+    scenarios::Vector{ConvexHullScenario}
+end
