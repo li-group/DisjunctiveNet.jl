@@ -8,6 +8,7 @@ include("convex_hull.jl")
 include("projection_backend.jl")
 include("differentiation.jl")
 include("projection_layer.jl")
+include("flux.jl")
 
 export DisjunctiveModel
 export DisjunctiveProjectionLayer
