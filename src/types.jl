@@ -13,25 +13,40 @@ Configuration for a disjunctive differentiable projection layer.
 """
 struct ProjectionConfig
     mode::Symbol
+    formulation::Symbol
     gradient::Symbol
     solver::Any
     tol::Float64
     fallback::Symbol
+    y_regularization::Float64
+    ycopy_regularization::Float64
+    gamma_regularization::Float64
+    anchor_regularization::Float64
 end
 
 function ProjectionConfig(;
     mode::Symbol = :dnf_qp,
-    gradient::Symbol = :diffopt,
+    formulation::Symbol = :dnf,
+    gradient::Symbol = mode == :milp ? :straight_through : :diffopt,
     solver = nothing,
     tol::Real = 1e-6,
     fallback::Symbol = :identity,
+    y_regularization::Real = 0.0,
+    ycopy_regularization::Real = 0.0,
+    gamma_regularization::Real = 0.0,
+    anchor_regularization::Real = 1e-3,
 )
     config = ProjectionConfig(
         mode,
+        formulation,
         gradient,
         solver,
         Float64(tol),
         fallback,
+        Float64(y_regularization),
+        Float64(ycopy_regularization),
+        Float64(gamma_regularization),
+        Float64(anchor_regularization),
     )
     _validate_projection_config(config)
     return config
@@ -263,4 +278,31 @@ struct ProjectionResult
     gamma::Vector{Float64}
     status::Any
     model::Any
+end
+
+"""
+    CNFConvexHullBlock
+
+One convex-hull block corresponding to one original disjunction.
+"""
+struct CNFConvexHullBlock
+    disjunction_index::Int
+    disjuncts::Vector{Vector{LinearConstraint}}
+end
+
+
+"""
+    CNFConvexHullForm
+
+CNF-style convex-hull representation.
+
+Instead of enumerating the full Cartesian product of disjunct choices, this
+keeps one convex-hull block per disjunction and intersects those blocks.
+"""
+struct CNFConvexHullForm
+    n_outputs::Int
+    lb::Vector{Float64}
+    ub::Vector{Float64}
+    global_constraints::Vector{LinearConstraint}
+    blocks::Vector{CNFConvexHullBlock}
 end

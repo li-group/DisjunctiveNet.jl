@@ -14,6 +14,10 @@ function build_projection_model(
     hull::ConvexHullForm,
     yhat::AbstractVector{<:Real};
     solver = nothing,
+    y_regularization::Real = 1e-8,
+    ycopy_regularization::Real = 1e-8,
+    gamma_regularization::Real = 1e-8,
+    anchor_regularization::Real = 1e-5,
 )
     length(yhat) == hull.n_outputs ||
         throw(DimensionMismatch("Expected yhat of length $(hull.n_outputs), got $(length(yhat))."))
@@ -53,14 +57,164 @@ function build_projection_model(
             _add_perspective_constraint!(model, constraint, y_copy, gamma, s)
         end
     end
+    
+    anchors = _default_scenario_anchors(hull)
+    model[:anchors] = anchors
 
-    @objective(model, Min, sum((y[j] - yhat_param[j])^2 for j in 1:n))
+    base_objective =
+        sum((y[j] - yhat_param[j])^2 for j in 1:n)
+
+    y_reg_objective =
+        Float64(y_regularization) *
+        sum(y[j]^2 for j in 1:n)
+
+    ycopy_reg_objective =
+        Float64(ycopy_regularization) *
+        sum(y_copy[s, j]^2 for s in 1:S, j in 1:n)
+
+    gamma_reg_objective =
+        Float64(gamma_regularization) *
+        sum(gamma[s]^2 for s in 1:S)
+
+    anchor_objective =
+        Float64(anchor_regularization) *
+        sum(
+            (y_copy[s, j] - gamma[s] * anchors[s, j])^2
+            for s in 1:S, j in 1:n
+        )
+
+    @objective(
+        model,
+        Min,
+        base_objective +
+        y_reg_objective +
+        ycopy_reg_objective +
+        gamma_reg_objective +
+        anchor_objective
+    )
 
     model[:y] = y
     model[:gamma] = gamma
     model[:y_copy] = y_copy
     model[:hull] = hull
     model[:yhat_param] = yhat_param
+
+    return model
+end
+
+function build_projection_model(
+    hull::CNFConvexHullForm,
+    yhat::AbstractVector{<:Real};
+    solver = nothing,
+    y_regularization::Real = 0.0,
+    ycopy_regularization::Real = 0.0,
+    gamma_regularization::Real = 0.0,
+    anchor_regularization::Real = 1e-3,
+)
+    length(yhat) == hull.n_outputs ||
+        throw(DimensionMismatch("Expected yhat of length $(hull.n_outputs), got $(length(yhat))."))
+
+    optimizer = solver === nothing ? HiGHS.Optimizer : solver
+    model = Model(() -> DiffOpt.diff_optimizer(optimizer))
+    set_silent(model)
+
+    n = hull.n_outputs
+    R = length(hull.blocks)
+
+    @variable(model, y[1:n])
+    @variable(model, yhat_param[1:n] in MOI.Parameter.(Float64.(yhat)))
+
+    # Base bounds on y.
+    for j in 1:n
+        if isfinite(hull.lb[j])
+            @constraint(model, y[j] >= hull.lb[j])
+        end
+        if isfinite(hull.ub[j])
+            @constraint(model, y[j] <= hull.ub[j])
+        end
+    end
+
+    # Global constraints on y.
+    for constraint in hull.global_constraints
+        _add_constraint_on_y!(model, constraint, y)
+    end
+
+    # If there are no disjunctions, this is just ordinary convex projection.
+    gamma_refs = Any[]
+    ycopy_refs = Any[]
+
+    for block in hull.blocks
+        r = block.disjunction_index
+        D = length(block.disjuncts)
+
+        gamma = @variable(model, [1:D], lower_bound = 0.0)
+        y_copy = @variable(model, [1:D, 1:n])
+
+        @constraint(model, sum(gamma[d] for d in 1:D) == 1.0)
+        @constraint(model, [j in 1:n], y[j] == sum(y_copy[d, j] for d in 1:D))
+
+        for d in 1:D
+            for j in 1:n
+                if isfinite(hull.lb[j])
+                    @constraint(model, y_copy[d, j] >= hull.lb[j] * gamma[d])
+                end
+                if isfinite(hull.ub[j])
+                    @constraint(model, y_copy[d, j] <= hull.ub[j] * gamma[d])
+                end
+            end
+
+            # Copy global constraints into each disjunct block.
+            # This gives the tighter hull conv((G ∩ D1) ∪ ... ∪ (G ∩ Dm)).
+            for constraint in hull.global_constraints
+                _add_perspective_constraint_cnf!(model, constraint, y_copy, gamma, d)
+            end
+
+            for constraint in block.disjuncts[d]
+                _add_perspective_constraint_cnf!(model, constraint, y_copy, gamma, d)
+            end
+        end
+
+        push!(gamma_refs, gamma)
+        push!(ycopy_refs, y_copy)
+    end
+
+    base_objective =
+        sum((y[j] - yhat_param[j])^2 for j in 1:n)
+
+    y_reg_objective =
+        Float64(y_regularization) *
+        sum(y[j]^2 for j in 1:n)
+
+    ycopy_reg_objective = zero(QuadExpr)
+    for y_copy_block in ycopy_refs
+        for d in axes(y_copy_block, 1)
+            for j in 1:n
+                ycopy_reg_objective += y_copy_block[d, j]^2
+            end
+        end
+    end
+    ycopy_reg_objective *= Float64(ycopy_regularization)
+
+    gamma_reg_objective = zero(QuadExpr)
+    for gamma_block in gamma_refs
+        for d in eachindex(gamma_block)
+            gamma_reg_objective += gamma_block[d]^2
+        end
+    end
+    gamma_reg_objective *= Float64(gamma_regularization)
+
+
+    @objective(
+        model,
+        Min,
+        base_objective + y_reg_objective + ycopy_reg_objective + gamma_reg_objective
+    )
+
+    model[:y] = y
+    model[:yhat_param] = yhat_param
+    model[:gamma_blocks] = gamma_refs
+    model[:ycopy_blocks] = ycopy_refs
+    model[:hull] = hull
 
     return model
 end
@@ -89,6 +243,35 @@ function _add_perspective_constraint!(
     return nothing
 end
 
+function project(
+    model::DisjunctiveModel,
+    yhat::AbstractVector{<:Real};
+    formulation::Symbol = :dnf,
+    solver = nothing,
+    y_regularization::Real = 0.0,
+    ycopy_regularization::Real = 0.0,
+    gamma_regularization::Real = 0.0,
+    anchor_regularization::Real = 1e-3,
+)
+    if formulation == :dnf
+        hull = convex_hull_form(model; prune_infeasible = false)
+    elseif formulation == :cnf
+        hull = cnf_hull_form(model)
+    else
+        throw(ArgumentError("Unknown formulation $(formulation). Expected :dnf or :cnf."))
+    end
+
+    return project(
+        hull,
+        yhat;
+        solver = solver,
+        y_regularization = y_regularization,
+        ycopy_regularization = ycopy_regularization,
+        gamma_regularization = gamma_regularization,
+        anchor_regularization = anchor_regularization,
+    )
+end
+
 
 """
     project(hull, yhat; solver = nothing)
@@ -99,8 +282,21 @@ function project(
     hull::ConvexHullForm,
     yhat::AbstractVector{<:Real};
     solver = nothing,
+    y_regularization::Real = 1e-8,
+    ycopy_regularization::Real = 1e-8,
+    gamma_regularization::Real = 1e-8,
+    anchor_regularization::Real = 1e-5,
 )
-    model = build_projection_model(hull, yhat; solver = solver)
+    model = build_projection_model(
+        hull,
+        yhat;
+        solver = solver,
+        y_regularization = y_regularization,
+        ycopy_regularization = ycopy_regularization,
+        gamma_regularization = gamma_regularization,
+        anchor_regularization = anchor_regularization,
+    )
+
     optimize!(model)
 
     status = termination_status(model)
@@ -125,17 +321,113 @@ function project(
     )
 end
 
+function _default_scenario_anchors(hull::ConvexHullForm)
+    n = hull.n_outputs
+    S = num_scenarios(hull)
 
-"""
-    project(model, yhat; solver = nothing)
+    midpoint = zeros(Float64, n)
 
-Convenience method that accepts a user-facing `DisjunctiveModel`.
-"""
+    for j in 1:n
+        if isfinite(hull.lb[j]) && isfinite(hull.ub[j])
+            midpoint[j] = 0.5 * (hull.lb[j] + hull.ub[j])
+        elseif isfinite(hull.lb[j])
+            midpoint[j] = hull.lb[j] + 1.0
+        elseif isfinite(hull.ub[j])
+            midpoint[j] = hull.ub[j] - 1.0
+        else
+            midpoint[j] = 0.0
+        end
+    end
+
+    anchors = zeros(Float64, S, n)
+
+    for s in 1:S
+        anchors[s, :] .= midpoint
+    end
+
+    return anchors
+end
+
+function _add_constraint_on_y!(
+    model::JuMP.Model,
+    constraint::LinearConstraint,
+    y,
+)
+    lhs = sum(constraint.a[j] * y[j] for j in eachindex(constraint.a))
+    rhs = constraint.b
+
+    if constraint.sense == :<=
+        @constraint(model, lhs <= rhs)
+    elseif constraint.sense == :>=
+        @constraint(model, lhs >= rhs)
+    elseif constraint.sense == :(==)
+        @constraint(model, lhs == rhs)
+    else
+        throw(ArgumentError("Unsupported constraint sense $(constraint.sense)."))
+    end
+
+    return nothing
+end
+
+
+function _add_perspective_constraint_cnf!(
+    model::JuMP.Model,
+    constraint::LinearConstraint,
+    y_copy,
+    gamma,
+    d::Int,
+)
+    lhs = sum(constraint.a[j] * y_copy[d, j] for j in eachindex(constraint.a))
+    rhs = constraint.b * gamma[d]
+
+    if constraint.sense == :<=
+        @constraint(model, lhs <= rhs)
+    elseif constraint.sense == :>=
+        @constraint(model, lhs >= rhs)
+    elseif constraint.sense == :(==)
+        @constraint(model, lhs == rhs)
+    else
+        throw(ArgumentError("Unsupported constraint sense $(constraint.sense)."))
+    end
+
+    return nothing
+end
+
 function project(
-    model::DisjunctiveModel,
+    hull::CNFConvexHullForm,
     yhat::AbstractVector{<:Real};
     solver = nothing,
+    y_regularization::Real = 0.0,
+    ycopy_regularization::Real = 0.0,
+    gamma_regularization::Real = 0.0,
+    anchor_regularization::Real = 1e-3,
 )
-    hull = convex_hull_form(model)
-    return project(hull, yhat; solver = solver)
+    model = build_projection_model(
+        hull,
+        yhat;
+        solver = solver,
+        y_regularization = y_regularization,
+        ycopy_regularization = ycopy_regularization,
+        gamma_regularization = gamma_regularization,
+        anchor_regularization = anchor_regularization,
+    )
+
+    optimize!(model)
+    status = termination_status(model)
+
+    if status != MOI.OPTIMAL
+        return ProjectionResult(
+            Float64.(collect(yhat)),
+            Float64[],
+            status,
+            model,
+        )
+    end
+
+    return ProjectionResult(
+        Float64.(value.(model[:y])),
+        Float64[],
+        status,
+        model,
+    )
 end

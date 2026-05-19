@@ -1,5 +1,6 @@
 import MathOptInterface as MOI
 
+
 """
     DisjunctiveProjectionLayer(model; mode = :dnf_qp, gradient = :diffopt, solver = nothing, kwargs...)
 
@@ -8,17 +9,27 @@ Create a differentiable projection layer from a `DisjunctiveModel`.
 function DisjunctiveProjectionLayer(
     model::DisjunctiveModel;
     mode::Symbol = :dnf_qp,
+    formulation::Symbol = :dnf,
     gradient::Symbol = mode == :milp ? :straight_through : :diffopt,
     solver = nothing,
     tol::Real = 1e-6,
     fallback::Symbol = :identity,
+    y_regularization::Real = 0.0,
+    ycopy_regularization::Real = 0.0,
+    gamma_regularization::Real = 0.0,
+    anchor_regularization::Real = 1e-3,
 )
     config = ProjectionConfig(
         mode = mode,
+        formulation = formulation,
         gradient = gradient,
         solver = solver,
         tol = Float64(tol),
         fallback = fallback,
+        y_regularization = Float64(y_regularization),
+        ycopy_regularization = Float64(ycopy_regularization),
+        gamma_regularization = Float64(gamma_regularization),
+        anchor_regularization = Float64(anchor_regularization),
     )
     return DisjunctiveProjectionLayer(model, config)
 end
@@ -30,7 +41,7 @@ end
 Return the projection mode used by the layer.
 """
 projection_mode(layer::DisjunctiveProjectionLayer) = layer.config.mode
-
+projection_formulation(layer::DisjunctiveProjectionLayer) = layer.config.formulation
 
 """
     (layer::DisjunctiveProjectionLayer)(yhat)
@@ -43,7 +54,12 @@ function (layer::DisjunctiveProjectionLayer)(yhat)
     result = project(
         layer.model,
         yhat;
+        formulation = layer.config.formulation,
         solver = layer.config.solver,
+        y_regularization = layer.config.y_regularization,
+        ycopy_regularization = layer.config.ycopy_regularization,
+        gamma_regularization = layer.config.gamma_regularization,
+        anchor_regularization = layer.config.anchor_regularization,
     )
 
     if result.status == MOI.OPTIMAL

@@ -1,40 +1,87 @@
 using ChainRulesCore
 using DiffOpt
+using JuMP: ParameterRef
 import MathOptInterface as MOI
+
+
+function _project_pullback(result::ProjectionResult, yhat, dresult)
+    dy = _projection_result_y_tangent(dresult, result.y)
+
+    if result.status != MOI.OPTIMAL
+        return zeros(Float64, length(yhat))
+    end
+
+    opt_model = result.model
+    y_var = opt_model[:y]
+    yhat_param = opt_model[:yhat_param]
+
+    MOI.set.(
+        opt_model,
+        DiffOpt.ReverseVariablePrimal(),
+        y_var,
+        Float64.(dy),
+    )
+
+    DiffOpt.reverse_differentiate!(opt_model)
+
+    yhat_refs = [ParameterRef(yhat_param[j]) for j in eachindex(yhat)]
+    raw_grad = MOI.get.(opt_model, DiffOpt.ReverseConstraintSet(), yhat_refs)
+
+    return Float64[g.value for g in raw_grad]
+end
+
 
 function ChainRulesCore.rrule(
     ::typeof(project),
     hull::ConvexHullForm,
     yhat::AbstractVector{<:Real};
     solver = nothing,
+    y_regularization::Real = 0.0,
+    ycopy_regularization::Real = 0.0,
+    gamma_regularization::Real = 0.0,
+    anchor_regularization::Real = 1e-3,
 )
-    result = project(hull, yhat; solver = solver)
+    result = project(
+        hull,
+        yhat;
+        solver = solver,
+        y_regularization = y_regularization,
+        ycopy_regularization = ycopy_regularization,
+        gamma_regularization = gamma_regularization,
+        anchor_regularization = anchor_regularization,
+    )
 
     function pullback(dresult)
-        dy = _projection_result_y_tangent(dresult, result.y)
+        grad = _project_pullback(result, yhat, dresult)
+        return NoTangent(), NoTangent(), grad
+    end
 
-        if result.status != MOI.OPTIMAL
-            return NoTangent(), NoTangent(), zeros(Float64, length(yhat))
-        end
+    return result, pullback
+end
 
-        model = result.model
-        y_var = model[:y]
-        yhat_param = model[:yhat_param]
 
-        MOI.set.(
-            model,
-            DiffOpt.ReverseVariablePrimal(),
-            y_var,
-            Float64.(dy),
-        )
+function ChainRulesCore.rrule(
+    ::typeof(project),
+    hull::CNFConvexHullForm,
+    yhat::AbstractVector{<:Real};
+    solver = nothing,
+    y_regularization::Real = 0.0,
+    ycopy_regularization::Real = 0.0,
+    gamma_regularization::Real = 0.0,
+    anchor_regularization::Real = 1e-3,
+)
+    result = project(
+        hull,
+        yhat;
+        solver = solver,
+        y_regularization = y_regularization,
+        ycopy_regularization = ycopy_regularization,
+        gamma_regularization = gamma_regularization,
+        anchor_regularization = anchor_regularization,
+    )
 
-        DiffOpt.reverse_differentiate!(model)
-
-        yhat_refs = [ParameterRef(yhat_param[j]) for j in eachindex(yhat)]
-        raw_grad = MOI.get.(model, DiffOpt.ReverseConstraintSet(), yhat_refs)
-
-        grad = Float64[g.value for g in raw_grad]
-
+    function pullback(dresult)
+        grad = _project_pullback(result, yhat, dresult)
         return NoTangent(), NoTangent(), grad
     end
 
@@ -46,36 +93,26 @@ function ChainRulesCore.rrule(
     ::typeof(project),
     model::DisjunctiveModel,
     yhat::AbstractVector{<:Real};
+    formulation::Symbol = :dnf,
     solver = nothing,
+    y_regularization::Real = 0.0,
+    ycopy_regularization::Real = 0.0,
+    gamma_regularization::Real = 0.0,
+    anchor_regularization::Real = 1e-3,
 )
-    hull = convex_hull_form(model)
-    result = project(hull, yhat; solver = solver)
+    result = project(
+        model,
+        yhat;
+        formulation = formulation,
+        solver = solver,
+        y_regularization = y_regularization,
+        ycopy_regularization = ycopy_regularization,
+        gamma_regularization = gamma_regularization,
+        anchor_regularization = anchor_regularization,
+    )
 
     function pullback(dresult)
-        dy = _projection_result_y_tangent(dresult, result.y)
-
-        if result.status != MOI.OPTIMAL
-            return NoTangent(), NoTangent(), zeros(Float64, length(yhat))
-        end
-
-        opt_model = result.model
-        y_var = opt_model[:y]
-        yhat_param = opt_model[:yhat_param]
-
-        MOI.set.(
-            opt_model,
-            DiffOpt.ReverseVariablePrimal(),
-            y_var,
-            Float64.(dy),
-        )
-
-        DiffOpt.reverse_differentiate!(opt_model)
-
-        yhat_refs = [ParameterRef(yhat_param[j]) for j in eachindex(yhat)]
-        raw_grad = MOI.get.(opt_model, DiffOpt.ReverseConstraintSet(), yhat_refs)
-
-        grad = Float64[g.value for g in raw_grad]
-
+        grad = _project_pullback(result, yhat, dresult)
         return NoTangent(), NoTangent(), grad
     end
 
@@ -105,6 +142,7 @@ function _projection_result_y_tangent(dresult, y_template)
     return Float64.(unthunked)
 end
 
+
 function ChainRulesCore.rrule(
     layer::DisjunctiveProjectionLayer,
     yhat::AbstractVector{<:Real},
@@ -112,17 +150,22 @@ function ChainRulesCore.rrule(
     y = layer(yhat)
 
     function pullback(dy)
-        hull = convex_hull_form(layer.model)
-
         _, pb = ChainRulesCore.rrule(
             project,
-            hull,
+            layer.model,
             yhat;
+            formulation = layer.config.formulation,
             solver = layer.config.solver,
+            y_regularization = layer.config.y_regularization,
+            ycopy_regularization = layer.config.ycopy_regularization,
+            gamma_regularization = layer.config.gamma_regularization,
+            anchor_regularization = layer.config.anchor_regularization,
         )
 
+        dy_vec = _projection_result_y_tangent(dy, y)
+
         dproject = ProjectionResult(
-            Float64.(ChainRulesCore.unthunk(dy)),
+            dy_vec,
             Float64[],
             MOI.OPTIMAL,
             nothing,

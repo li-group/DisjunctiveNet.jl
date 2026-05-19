@@ -5,10 +5,12 @@ include("utils.jl")
 include("modeling.jl")
 include("standard_form.jl")
 include("convex_hull.jl")
+include("cnf_hull.jl")
 include("projection_backend.jl")
 include("differentiation.jl")
 include("projection_layer.jl")
 include("flux.jl")
+include("display.jl")
 
 export DisjunctiveModel
 export DisjunctiveProjectionLayer
@@ -19,6 +21,11 @@ export Disjunction
 export StandardDisjunctiveModel
 export ConvexHullForm
 export ConvexHullScenario
+
+export CNFConvexHullForm
+export CNFConvexHullBlock
+export cnf_hull_form
+export num_blocks
 
 export output_dimension
 export lower_bounds
@@ -32,11 +39,17 @@ export disjunctions
 export standard_form
 export convex_hull_form
 export num_scenarios
+export scenario_has_interior_point
 
 export projection_mode
 
 export ProjectionResult
 export project
 export build_projection_model
+export projection_formulation
+
+export print_model
+export print_hull
+export print_projection_model
 
 end

@@ -14,7 +14,6 @@ Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
 ChainRulesCore = "1.26.1"
-DiffOpt = "0.5.6"
 Flux = "0.16.10"
 HiGHS = "1.23.0"
 JuMP = "1.30.1"
