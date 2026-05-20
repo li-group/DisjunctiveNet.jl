@@ -68,7 +68,8 @@ function print_model(model::DisjunctiveModel; io::IO = stdout)
         println(io, "    none")
     else
         for (r, disj) in enumerate(model.disjunctions)
-            println(io, "    disjunction[$r]:")
+            name_str = disj.name === nothing ? "" : " name=$(disj.name)"
+            println(io, "    disjunction[$r]$name_str:")
             for (d, disjunct) in enumerate(disj.disjuncts)
                 println(io, "      disjunct[$d]:")
                 for (q, c) in enumerate(disjunct)
@@ -171,15 +172,125 @@ end
 
 
 """
-    print_projection_model(model::DisjunctiveModel; formulation = :dnf, io = stdout, kwargs...)
+    print_hull(hull::PartialDNFHullForm; io = stdout)
 
-Print the lifted projection model that will be built for DNF or CNF.
+Print the partial-DNF lifted representation.
+
+The selected DNF rules are expanded jointly into one scenario block.
+The remaining rules are kept as separate CNF convex-hull blocks.
+"""
+function print_hull(hull::PartialDNFHullForm; io::IO = stdout)
+    println(io, "Partial-DNF HullForm")
+    println(io, "  n_outputs: $(hull.n_outputs)")
+    println(io, "  DNF-expanded rules: $(hull.dnf_indices)")
+    println(io, "  DNF scenarios: $(length(hull.dnf_scenarios))")
+    println(io, "  CNF blocks: $(length(hull.cnf_blocks))")
+
+    println(io, "  variables:")
+    println(io, "    y[1:$(hull.n_outputs)]")
+
+    if !isempty(hull.dnf_scenarios)
+        println(io, "    DNF block:")
+        println(io, "      gamma_dnf[1:$(length(hull.dnf_scenarios))]")
+        println(io, "      y_dnf_copy[1:$(length(hull.dnf_scenarios)), 1:$(hull.n_outputs)]")
+    else
+        println(io, "    DNF block: none")
+    end
+
+    if !isempty(hull.cnf_blocks)
+        println(io, "    CNF blocks:")
+        println(io, "      for each remaining rule r:")
+        println(io, "        gamma_r[1:num_disjuncts(r)]")
+        println(io, "        y_copy_r[1:num_disjuncts(r), 1:$(hull.n_outputs)]")
+    else
+        println(io, "    CNF blocks: none")
+    end
+
+    println(io, "  global constraints on y:")
+    if isempty(hull.global_constraints)
+        println(io, "    none")
+    else
+        for (i, c) in enumerate(hull.global_constraints)
+            println(io, "    g[$i]: $(_constraint_string(c))")
+        end
+    end
+
+    println(io, "  DNF block:")
+    if isempty(hull.dnf_scenarios)
+        println(io, "    none")
+    else
+        println(io, "    linking constraints:")
+        println(io, "      sum_s gamma_dnf[s] == 1")
+        println(io, "      y[j] == sum_s y_dnf_copy[s,j] for each j")
+        println(io, "    global constraints copied into every DNF scenario:")
+        if isempty(hull.global_constraints)
+            println(io, "      none")
+        else
+            for (i, c) in enumerate(hull.global_constraints)
+                println(io, "      g[$i,s]: $(_constraint_string(c)) scaled by gamma_dnf[s]")
+            end
+        end
+
+        println(io, "    scenarios:")
+        for (s, scenario) in enumerate(hull.dnf_scenarios)
+            println(io, "      scenario[$s], choices = $(scenario.choices):")
+            if isempty(scenario.local_constraints)
+                println(io, "        local constraints: none")
+            else
+                for (q, c) in enumerate(scenario.local_constraints)
+                    println(io, "        c[$q,s]: $(_constraint_string(c)) scaled by gamma_dnf[$s]")
+                end
+            end
+        end
+    end
+
+    println(io, "  CNF blocks:")
+    if isempty(hull.cnf_blocks)
+        println(io, "    none")
+    else
+        for block in hull.cnf_blocks
+            println(io, "    block[$(block.disjunction_index)]:")
+            println(io, "      sum_d gamma[d] == 1")
+            println(io, "      y[j] == sum_d y_copy[d,j] for each j")
+            println(io, "      global constraints copied into every disjunct copy:")
+
+            if isempty(hull.global_constraints)
+                println(io, "        none")
+            else
+                for (i, c) in enumerate(hull.global_constraints)
+                    println(io, "        g[$i,d]: $(_constraint_string(c)) scaled by gamma[d]")
+                end
+            end
+
+            for (d, disjunct) in enumerate(block.disjuncts)
+                println(io, "      disjunct[$d]:")
+                if isempty(disjunct)
+                    println(io, "        local constraints: none")
+                else
+                    for (q, c) in enumerate(disjunct)
+                        println(io, "        c[$q]: $(_constraint_string(c)) scaled by gamma[$d]")
+                    end
+                end
+            end
+        end
+    end
+
+    return nothing
+end
+
+
+"""
+    print_projection_model(model; formulation = :dnf, io = stdout, kwargs...)
+
+Print the lifted projection model that will be built for DNF, CNF, or partial-DNF.
 """
 function print_projection_model(
     model::DisjunctiveModel;
     formulation::Symbol = :dnf,
     io::IO = stdout,
     prune_infeasible::Bool = false,
+    num_dnf_rules::Int = -1,
+    rule_ordering = nothing,
 )
     print_model(model; io = io)
 
@@ -192,8 +303,15 @@ function print_projection_model(
     elseif formulation == :cnf
         hull = cnf_hull_form(model)
         print_hull(hull; io = io)
+    elseif formulation == :partial_dnf
+        hull = partial_dnf_hull_form(
+            model;
+            ordering = rule_ordering,
+            num_dnf_rules = num_dnf_rules,
+        )
+        print_hull(hull; io = io)
     else
-        throw(ArgumentError("Unknown formulation $(formulation). Expected :dnf or :cnf."))
+        throw(ArgumentError("Unknown formulation $(formulation). Expected :dnf, :cnf, or :partial_dnf."))
     end
 
     return nothing
