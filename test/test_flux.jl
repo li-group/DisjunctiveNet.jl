@@ -1,0 +1,54 @@
+@testset "Flux integration" begin
+        dm = DisjunctiveModel(2)
+
+        set_bounds!(
+            dm,
+            lower = [0.0, 0.0],
+            upper = [1.0, 1.0],
+        )
+
+        # Global constraint: y1 + y2 >= 0.8
+        add_linear_constraint!(dm, [1.0, 1.0], :>=, 0.8)
+
+        d1 = [
+            LinearConstraint([1.0, 0.0], :<=, 0.25),
+        ]
+
+        d2 = [
+            LinearConstraint([1.0, 0.0], :>=, 0.75),
+        ]
+
+        add_disjunction!(dm, d1, d2)
+
+        layer = DisjunctiveProjectionLayer(
+            dm;
+            y_regularization = 1e-4,
+            ycopy_regularization = 1e-4,
+            gamma_regularization = 1e-4,
+            anchor_regularization = 1e-4,
+        )
+
+        model = Chain(
+            Dense(2 => 8, relu),
+            Dense(8 => 2),
+            layer,
+        )
+
+        x = Float32[0.3, 0.4]
+
+        y = model(x)
+
+        @test length(y) == 2
+        @test y[1] >= -1e-6
+        @test y[1] <= 1.0 + 1e-6
+        @test y[2] >= -1e-6
+        @test y[2] <= 1.0 + 1e-6
+        @test y[1] + y[2] >= 0.8 - 1e-6
+
+        ps = Flux.trainables(model)
+        @test !isempty(ps)
+
+        loss(m, x) = sum(m(x))
+        grads = Flux.gradient(m -> loss(m, x), model)
+        @test grads !== nothing
+    end
