@@ -1,17 +1,23 @@
 module DisjunctiveDifferentiableLayers
 
-include("types.jl")
-include("utils.jl")
-include("modeling.jl")
-include("standard_form.jl")
-include("convex_hull.jl")
-include("cnf_hull.jl")
-include("partial_dnf_hull.jl")
-include("projection_backend.jl")
-include("differentiation.jl")
-include("projection_layer.jl")
-include("flux.jl")
-include("display.jl")
+include("core/types.jl")
+include("core/utils.jl")
+
+include("modeling/modeling.jl")
+include("modeling/standard_form.jl")
+
+include("formulations/convex_hull.jl")
+include("formulations/cnf_hull.jl")
+include("formulations/partial_dnf_hull.jl")
+
+include("backend/projection_backend.jl")
+include("backend/differentiation.jl")
+
+include("layers/projection_layer.jl")
+include("layers/flux.jl")
+
+include("display/display.jl")
+
 
 export DisjunctiveModel
 export DisjunctiveProjectionLayer
