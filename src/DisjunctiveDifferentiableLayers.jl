@@ -6,6 +6,7 @@ include("modeling.jl")
 include("standard_form.jl")
 include("convex_hull.jl")
 include("cnf_hull.jl")
+include("partial_dnf_hull.jl")
 include("projection_backend.jl")
 include("differentiation.jl")
 include("projection_layer.jl")
@@ -21,6 +22,8 @@ export Disjunction
 export StandardDisjunctiveModel
 export ConvexHullForm
 export ConvexHullScenario
+export PartialDNFHullForm
+export partial_dnf_hull_form
 
 export CNFConvexHullForm
 export CNFConvexHullBlock

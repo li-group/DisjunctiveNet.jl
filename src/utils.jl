@@ -2,8 +2,7 @@ function _validate_projection_config(config::ProjectionConfig)
     valid_modes = (:dnf_qp, :milp)
     valid_gradients = (:diffopt, :straight_through)
     valid_fallbacks = (:identity, :error)
-    valid_formulations = (:dnf, :cnf)
-
+    valid_formulations = (:dnf, :cnf, :partial_dnf)
     
     config.mode in valid_modes ||
         throw(ArgumentError("Invalid projection mode $(config.mode). Expected one of $(valid_modes)."))
@@ -26,7 +25,10 @@ function _validate_projection_config(config::ProjectionConfig)
     config.anchor_regularization >= 0 ||
         throw(ArgumentError("anchor_regularization must be nonnegative."))
     
-        config.formulation in valid_formulations ||
+    config.num_dnf_rules >= -1 ||
+        throw(ArgumentError("num_dnf_rules must be -1 or nonnegative."))
+    
+    config.formulation in valid_formulations ||
         throw(ArgumentError("Invalid formulation $(config.formulation). Expected one of $(valid_formulations)."))
 
     if config.mode == :milp && config.gradient == :diffopt

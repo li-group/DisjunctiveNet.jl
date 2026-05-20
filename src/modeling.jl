@@ -92,17 +92,26 @@ end
 
 
 """
-    add_disjunction!(model, disjuncts...)
+    add_disjunction!(model, disjuncts...; name = nothing)
 
 Add a disjunction to the model.
 
 Each argument should be a vector of `LinearConstraint`s.
+If `name` is provided, it must be unique among named disjunctions.
 """
 function add_disjunction!(
     model::DisjunctiveModel,
-    disjuncts::Vector{LinearConstraint}...,
+    disjuncts::Vector{LinearConstraint}...;
+    name::Union{Nothing, Symbol} = nothing,
 )
     isempty(disjuncts) && throw(ArgumentError("At least one disjunct is required."))
+
+    if name !== nothing
+        for existing in model.disjunctions
+            existing.name == name &&
+                throw(ArgumentError("A disjunction named $(name) already exists."))
+        end
+    end
 
     copied_disjuncts = Vector{Vector{LinearConstraint}}()
 
@@ -114,7 +123,7 @@ function add_disjunction!(
         push!(copied_disjuncts, collect(disjunct))
     end
 
-    disjunction = Disjunction(copied_disjuncts)
+    disjunction = Disjunction(copied_disjuncts; name = name)
     push!(model.disjunctions, disjunction)
     return disjunction
 end

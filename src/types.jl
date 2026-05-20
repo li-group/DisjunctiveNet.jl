@@ -18,6 +18,8 @@ struct ProjectionConfig
     solver::Any
     tol::Float64
     fallback::Symbol
+    num_dnf_rules::Int
+    rule_ordering::Any
     y_regularization::Float64
     ycopy_regularization::Float64
     gamma_regularization::Float64
@@ -31,6 +33,8 @@ function ProjectionConfig(;
     solver = nothing,
     tol::Real = 1e-6,
     fallback::Symbol = :identity,
+    num_dnf_rules::Int = -1,
+    rule_ordering = nothing,
     y_regularization::Real = 0.0,
     ycopy_regularization::Real = 0.0,
     gamma_regularization::Real = 0.0,
@@ -43,6 +47,8 @@ function ProjectionConfig(;
         solver,
         Float64(tol),
         fallback,
+        num_dnf_rules,
+        rule_ordering,
         Float64(y_regularization),
         Float64(ycopy_regularization),
         Float64(gamma_regularization),
@@ -78,24 +84,24 @@ end
 
 
 """
-    Disjunction(disjuncts)
+    Disjunction(disjuncts; name = nothing)
 
 A disjunction represented as a list of disjuncts.
 
-Each disjunct is a vector of `LinearConstraint`s. For example, a two-way
-disjunction has the form
-
-    Disjunction([
-        [constraint_1, constraint_2],
-        [constraint_3, constraint_4],
-    ])
+Each disjunct is a vector of `LinearConstraint`s.
 """
 struct Disjunction
+    name::Union{Nothing, Symbol}
     disjuncts::Vector{Vector{LinearConstraint}}
 
-    function Disjunction(disjuncts::Vector{Vector{LinearConstraint}})
-        isempty(disjuncts) && throw(ArgumentError("A disjunction must contain at least one disjunct."))
-        return new(disjuncts)
+    function Disjunction(
+        disjuncts::Vector{Vector{LinearConstraint}};
+        name::Union{Nothing, Symbol} = nothing,
+    )
+        isempty(disjuncts) &&
+            throw(ArgumentError("A disjunction must contain at least one disjunct."))
+
+        return new(name, disjuncts)
     end
 end
 
@@ -306,3 +312,25 @@ struct CNFConvexHullForm
     global_constraints::Vector{LinearConstraint}
     blocks::Vector{CNFConvexHullBlock}
 end
+
+
+"""
+    PartialDNFHullForm
+
+Partial-DNF lifted representation.
+
+Some disjunctions are expanded jointly into one DNF block.
+The remaining disjunctions are kept as separate CNF blocks.
+"""
+struct PartialDNFHullForm
+    n_outputs::Int
+    lb::Vector{Float64}
+    ub::Vector{Float64}
+    global_constraints::Vector{LinearConstraint}
+
+    dnf_indices::Vector{Int}
+    dnf_scenarios::Vector{ConvexHullScenario}
+
+    cnf_blocks::Vector{CNFConvexHullBlock}
+end
+

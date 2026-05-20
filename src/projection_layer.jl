@@ -14,6 +14,8 @@ function DisjunctiveProjectionLayer(
     solver = nothing,
     tol::Real = 1e-6,
     fallback::Symbol = :identity,
+    num_dnf_rules::Int = -1,
+    rule_ordering = nothing,
     y_regularization::Real = 0.0,
     ycopy_regularization::Real = 0.0,
     gamma_regularization::Real = 0.0,
@@ -26,6 +28,8 @@ function DisjunctiveProjectionLayer(
         solver = solver,
         tol = Float64(tol),
         fallback = fallback,
+        num_dnf_rules = num_dnf_rules,
+        rule_ordering = rule_ordering,
         y_regularization = Float64(y_regularization),
         ycopy_regularization = Float64(ycopy_regularization),
         gamma_regularization = Float64(gamma_regularization),
@@ -60,6 +64,8 @@ function (layer::DisjunctiveProjectionLayer)(yhat)
         ycopy_regularization = layer.config.ycopy_regularization,
         gamma_regularization = layer.config.gamma_regularization,
         anchor_regularization = layer.config.anchor_regularization,
+        num_dnf_rules = layer.config.num_dnf_rules,
+        rule_ordering = layer.config.rule_ordering,
     )
 
     if result.status == MOI.OPTIMAL

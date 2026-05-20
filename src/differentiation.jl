@@ -88,6 +88,34 @@ function ChainRulesCore.rrule(
     return result, pullback
 end
 
+function ChainRulesCore.rrule(
+    ::typeof(project),
+    hull::PartialDNFHullForm,
+    yhat::AbstractVector{<:Real};
+    solver = nothing,
+    y_regularization::Real = 0.0,
+    ycopy_regularization::Real = 0.0,
+    gamma_regularization::Real = 0.0,
+    anchor_regularization::Real = 1e-3,
+)
+    result = project(
+        hull,
+        yhat;
+        solver = solver,
+        y_regularization = y_regularization,
+        ycopy_regularization = ycopy_regularization,
+        gamma_regularization = gamma_regularization,
+        anchor_regularization = anchor_regularization,
+    )
+
+    function pullback(dresult)
+        grad = _project_pullback(result, yhat, dresult)
+        return NoTangent(), NoTangent(), grad
+    end
+
+    return result, pullback
+end
+
 
 function ChainRulesCore.rrule(
     ::typeof(project),
@@ -95,6 +123,8 @@ function ChainRulesCore.rrule(
     yhat::AbstractVector{<:Real};
     formulation::Symbol = :dnf,
     solver = nothing,
+    num_dnf_rules::Int = -1,
+    rule_ordering = nothing,
     y_regularization::Real = 0.0,
     ycopy_regularization::Real = 0.0,
     gamma_regularization::Real = 0.0,
@@ -105,6 +135,8 @@ function ChainRulesCore.rrule(
         yhat;
         formulation = formulation,
         solver = solver,
+        num_dnf_rules = num_dnf_rules,
+        rule_ordering = rule_ordering,
         y_regularization = y_regularization,
         ycopy_regularization = ycopy_regularization,
         gamma_regularization = gamma_regularization,
