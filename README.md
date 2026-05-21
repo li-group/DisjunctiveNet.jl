@@ -852,9 +852,9 @@ partial-DNF k=1      status=OPTIMAL build=0.003s solve=0.004s vars=62 cons=180 y
 Run examples from the package root:
 
 ```bash
-julia --project=. examples/01_basic_dnf_cnf_partial.jl
-julia --project=. examples/02_comprehensive_formulations.jl
-julia --project=. examples/03_large_scale_comparison.jl
+julia --project=. examples/basic_example.jl
+julia --project=. examples/midsize_example.jl
+julia --project=. examples/largesize_example.jl
 julia --project=. examples/flux_end2end.jl
 ```
 
