@@ -802,7 +802,7 @@ println("Projected prediction after one update = ", y_after)
 println("Feasibility check after update: y1 + y2 = ", sum(y_after))
 ```
 
-The user never has to write an adjoint or reverse pass. The constrained model is a Flux-compatible model.
+The constrained model is a Flux-compatible model.
 
 ---
 
