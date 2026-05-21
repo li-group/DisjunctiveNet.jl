@@ -150,12 +150,14 @@ function print_hull(hull::CNFConvexHullForm; io::IO = stdout)
     println(io, "      gamma_r[1:num_disjuncts(r)]")
     println(io, "      y_copy_r[1:num_disjuncts(r), 1:$(hull.n_outputs)]")
 
+
+
     println(io, "  global constraints on y:")
     if isempty(hull.global_constraints)
         println(io, "    none")
     else
         for (i, c) in enumerate(hull.global_constraints)
-            println(io, "        g[$i,d]: $(_scaled_constraint_string(c, "gamma[d]"))")
+            println(io, "    g[$i]: $(_constraint_string(c))")
         end
     end
 
@@ -170,6 +172,15 @@ function print_hull(hull::CNFConvexHullForm; io::IO = stdout)
             println(io, "        bounds and global constraints copied with gamma[$d]")
             for (q, c) in enumerate(disjunct)
                 println(io, "        c[$q]: $(_scaled_constraint_string(c, "gamma[$d]"))")
+            end
+
+            println(io, "  global constraints on y:")
+            if isempty(hull.global_constraints)
+                println(io, "    none")
+            else
+                for (i, c) in enumerate(hull.global_constraints)
+                    println(io, "        g[$i,d]: $(_scaled_constraint_string(c, "gamma[d]"))")
+                end
             end
         end
     end

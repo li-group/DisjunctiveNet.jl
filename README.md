@@ -2,7 +2,7 @@
 
 `DisjunctiveDifferentiableLayers.jl` provides differentiable projection layers for neural networks whose outputs must satisfy mixed logical-linear constraints.
 
-The package lets users define rules of the form
+The package lets users define constraints of the form
 
 ```text
 global linear constraints
@@ -13,9 +13,25 @@ global linear constraints
 + ...
 ```
 
-and automatically builds a differentiable projection layer that can be placed after a Flux neural network.
+and automatically builds a differentiable projection layer that can be placed after a neural network, especially a Flux.jl model.
 
-The layer supports three lifted formulations:
+The intended workflow is:
+
+```text
+raw neural prediction
+        ↓
+differentiable disjunctive projection layer
+        ↓
+constraint-satisfying prediction
+```
+
+The package is designed for research on differentiable constrained learning, neural-symbolic learning, and safe neural network prediction.
+
+---
+
+## Formulations
+
+The layer supports three lifted convexified formulations.
 
 | Formulation | Description |
 |---|---|
@@ -23,7 +39,7 @@ The layer supports three lifted formulations:
 | `:cnf` | One convex-hull block per disjunction. Scalable but generally weaker. |
 | `:partial_dnf` | Expands a chosen subset of rules into DNF and keeps the rest as CNF. |
 
-The package is designed for research on differentiable constrained learning, neural-symbolic learning, and safe neural network prediction.
+All three formulations are convexified projection layers. The projected output is guaranteed to satisfy the selected convexified formulation. Depending on the formulation, especially `:cnf` and `:partial_dnf`, the projected output may lie in a relaxation of the original discrete logical set.
 
 ---
 
@@ -36,14 +52,14 @@ Until the DiffOpt patch is upstreamed, install the modified DiffOpt first:
 ```julia
 using Pkg
 
-Pkg.add(url = "https://github.com/Shraman_Pal/DiffOpt.jl")
-Pkg.add(url = "https://github.com/YOUR_USERNAME/DisjunctiveDifferentiableLayers.jl")
+Pkg.add(url = "https://github.com/ShramanPal/DiffOpt.jl")
+Pkg.add(url = "https://github.com/ShramanPal/DisjunctiveDifferentiableLayers.jl")
 ```
 
 For local development:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/DisjunctiveDifferentiableLayers.jl
+git clone https://github.com/ShramanPal/DisjunctiveDifferentiableLayers.jl
 cd DisjunctiveDifferentiableLayers.jl
 julia --project=.
 ```
@@ -66,7 +82,7 @@ A neural network produces an unconstrained prediction:
 yhat = backbone(x)
 ```
 
-The projection layer maps it to a feasible point:
+The projection layer maps it to a point satisfying the selected convexified rule set:
 
 ```julia
 y = projection_layer(yhat)
@@ -75,7 +91,7 @@ y = projection_layer(yhat)
 The full constrained model is:
 
 ```julia
-x -> backbone(x) -> disjunctive projection layer -> feasible y
+x -> backbone(x) -> disjunctive projection layer -> projected y
 ```
 
 The projection is differentiable, so training can be performed using ordinary Flux/Zygote code.
@@ -96,7 +112,7 @@ We want:
 0 <= y[1] <= 1
 0 <= y[2] <= 1
 
-global rule:
+global constraint:
 y[1] + y[2] >= 0.8
 
 rule 1:
@@ -106,21 +122,33 @@ rule 2:
 y[2] <= 0.25 OR y[2] >= 0.75
 ```
 
-This can be modeled as:
+This can be modeled as follows.
 
 ```julia
 using DisjunctiveDifferentiableLayers
 
+# Create a disjunctive model with two output variables:
+# y[1] and y[2].
 dm = DisjunctiveModel(2)
 
+# Set box bounds:
+# 0 <= y[1] <= 1
+# 0 <= y[2] <= 1
 set_bounds!(
     dm,
     lower = [0.0, 0.0],
     upper = [1.0, 1.0],
 )
 
+# Add a global linear constraint.
+# This constraint must hold in the projected output:
+# y[1] + y[2] >= 0.8
 add_linear_constraint!(dm, [1.0, 1.0], :>=, 0.8)
 
+# Add rule 1:
+# y[1] <= 0.25 OR y[1] >= 0.75
+#
+# The name :x_split is optional, but useful for partial-DNF ordering.
 add_disjunction!(
     dm,
     [LinearConstraint([1.0, 0.0], :<=, 0.25)],
@@ -128,6 +156,11 @@ add_disjunction!(
     name = :x_split,
 )
 
+# Add rule 2:
+# y[2] <= 0.25 OR y[2] >= 0.75
+#
+# The name :y_split lets us refer to this rule later, for example in
+# rule_ordering = [:x_split, :y_split].
 add_disjunction!(
     dm,
     [LinearConstraint([0.0, 1.0], :<=, 0.25)],
@@ -136,17 +169,19 @@ add_disjunction!(
 )
 ```
 
-Inspect the model:
+Inspect the user-facing model:
 
 ```julia
 print_model(dm)
 ```
 
-Inspect the lifted projection formulation:
+Inspect the lifted projection formulations:
 
 ```julia
 print_projection_model(dm; formulation = :dnf)
+
 print_projection_model(dm; formulation = :cnf)
+
 print_projection_model(
     dm;
     formulation = :partial_dnf,
@@ -154,6 +189,377 @@ print_projection_model(
     rule_ordering = [:x_split, :y_split],
 )
 ```
+
+---
+
+## Optional: JuMP-style linear constraints
+
+For convenience, users can also write constraints using JuMP’s `@build_constraint` syntax. This avoids manually constructing `LinearConstraint` objects.
+
+```julia
+using JuMP
+using DisjunctiveDifferentiableLayers
+
+# Create a fresh model.
+dm2 = DisjunctiveModel(2)
+
+set_bounds!(
+    dm2,
+    lower = [0.0, 0.0],
+    upper = [1.0, 1.0],
+)
+
+# Get the JuMP variables associated with the model outputs.
+y = output_variables(dm2)
+
+# Add the global constraint:
+# y[1] + y[2] >= 0.8
+add_linear_constraint!(
+    dm2,
+    @build_constraint(y[1] + y[2] >= 0.8),
+)
+
+# Add rule 1:
+# y[1] <= 0.25 OR y[1] >= 0.75
+add_disjunction!(
+    dm2,
+    [@build_constraint(y[1] <= 0.25)],
+    [@build_constraint(y[1] >= 0.75)];
+    name = :x_split,
+)
+
+# Add rule 2:
+# y[2] <= 0.25 OR y[2] >= 0.75
+add_disjunction!(
+    dm2,
+    [@build_constraint(y[2] <= 0.25)],
+    [@build_constraint(y[2] >= 0.75)];
+    name = :y_split,
+)
+```
+
+The explicit `LinearConstraint(...)` interface and the JuMP-style `@build_constraint(...)` interface create the same internal representation.
+
+---
+
+## Core API
+
+### `DisjunctiveModel(n_outputs)`
+
+Creates a model for a neural network output vector of length `n_outputs`.
+
+```julia
+dm = DisjunctiveModel(3)
+```
+
+This means the projection layer expects raw neural network predictions of length 3:
+
+```julia
+yhat = [yhat1, yhat2, yhat3]
+```
+
+and returns a projected vector:
+
+```julia
+y = [y1, y2, y3]
+```
+
+---
+
+### `set_bounds!(model; lower, upper)`
+
+Sets box bounds on the projected output variables.
+
+```julia
+set_bounds!(
+    dm,
+    lower = [0.0, 0.0],
+    upper = [1.0, 1.0],
+)
+```
+
+This imposes:
+
+```text
+0 <= y[1] <= 1
+0 <= y[2] <= 1
+```
+
+Finite bounds are strongly recommended because they are used by the convex-hull formulations.
+
+---
+
+### `LinearConstraint(a, sense, b)`
+
+Represents a linear constraint of the form:
+
+```text
+a' y <= b
+a' y >= b
+a' y == b
+```
+
+depending on `sense`.
+
+Examples:
+
+```julia
+LinearConstraint([1.0, 1.0], :>=, 0.8)
+```
+
+means:
+
+```text
+y[1] + y[2] >= 0.8
+```
+
+```julia
+LinearConstraint([1.0, 0.0], :<=, 0.25)
+```
+
+means:
+
+```text
+y[1] <= 0.25
+```
+
+Supported senses are:
+
+```julia
+:<=
+:>=
+:(==)
+```
+
+---
+
+### `add_linear_constraint!(model, ...)`
+
+Adds a global linear constraint.
+
+Global constraints are enforced across the full projection model. They are useful for constraints that should always hold, regardless of which disjunctive branch is active.
+
+Coefficient-vector form:
+
+```julia
+add_linear_constraint!(
+    dm,
+    [1.0, 1.0],
+    :>=,
+    0.8,
+)
+```
+
+Equivalent explicit object form:
+
+```julia
+add_linear_constraint!(
+    dm,
+    LinearConstraint([1.0, 1.0], :>=, 0.8),
+)
+```
+
+Equivalent JuMP-style form:
+
+```julia
+using JuMP
+
+y = output_variables(dm)
+
+add_linear_constraint!(
+    dm,
+    @build_constraint(y[1] + y[2] >= 0.8),
+)
+```
+
+---
+
+### `add_disjunction!(model, disjuncts...; name = nothing)`
+
+Adds a disjunctive rule.
+
+Each argument is one disjunct, and each disjunct is a vector of linear constraints.
+
+For example:
+
+```julia
+add_disjunction!(
+    dm,
+    [LinearConstraint([1.0, 0.0], :<=, 0.25)],
+    [LinearConstraint([1.0, 0.0], :>=, 0.75)];
+    name = :x_split,
+)
+```
+
+means:
+
+```text
+y[1] <= 0.25 OR y[1] >= 0.75
+```
+
+A disjunct can contain multiple constraints:
+
+```julia
+add_disjunction!(
+    dm,
+    [
+        LinearConstraint([1.0, 0.0], :>=, 0.4),
+        LinearConstraint([1.0, 0.0], :<=, 0.6),
+    ],
+    [LinearConstraint([1.0, 0.0], :>=, 0.8)];
+    name = :x_mid_or_high,
+)
+```
+
+means:
+
+```text
+0.4 <= y[1] <= 0.6 OR y[1] >= 0.8
+```
+
+The same rule can be written with JuMP-style constraints:
+
+```julia
+using JuMP
+
+y = output_variables(dm)
+
+add_disjunction!(
+    dm,
+    [
+        @build_constraint(y[1] >= 0.4),
+        @build_constraint(y[1] <= 0.6),
+    ],
+    [@build_constraint(y[1] >= 0.8)];
+    name = :x_mid_or_high,
+)
+```
+
+The `name` keyword is optional, but recommended. Named rules can be used to control partial-DNF ordering:
+
+```julia
+rule_ordering = [:x_split, :y_split]
+```
+
+---
+
+### `output_variables(model)`
+
+Returns JuMP variables associated with the output coordinates. This is used with JuMP-style constraint construction.
+
+```julia
+using JuMP
+
+y = output_variables(dm)
+
+add_linear_constraint!(
+    dm,
+    @build_constraint(y[1] + y[2] >= 0.8),
+)
+```
+
+This is often easier to read than manually writing coefficient vectors.
+
+---
+
+### `project(model, yhat; formulation = :dnf)`
+
+Projects a raw prediction onto the selected convexified rule set.
+
+```julia
+yhat = [0.5, 0.1]
+
+result = project(dm, yhat; formulation = :dnf)
+
+println(result.status)
+println(result.y)
+```
+
+The result contains:
+
+```julia
+result.y       # projected prediction
+result.status  # solver termination status
+result.model   # internal JuMP/DiffOpt model
+```
+
+Common choices:
+
+```julia
+project(dm, yhat; formulation = :dnf)
+
+project(dm, yhat; formulation = :cnf)
+
+project(
+    dm,
+    yhat;
+    formulation = :partial_dnf,
+    num_dnf_rules = 1,
+    rule_ordering = [:x_split, :y_split],
+)
+```
+
+---
+
+### `DisjunctiveProjectionLayer(model; formulation = :dnf)`
+
+Creates a differentiable projection layer.
+
+```julia
+layer = DisjunctiveProjectionLayer(dm; formulation = :partial_dnf)
+
+y = layer(yhat)
+```
+
+The layer can be placed after a Flux neural network.
+
+```julia
+model = Chain(
+    Dense(4 => 16, relu),
+    Dense(16 => 2),
+    layer,
+)
+```
+
+---
+
+### `constrained_model(backbone, model; kwargs...)`
+
+Wraps a Flux neural network with a disjunctive projection layer.
+
+```julia
+model = constrained_model(
+    backbone,
+    dm;
+    formulation = :partial_dnf,
+    num_dnf_rules = 1,
+    rule_ordering = [:x_rule, :y_rule],
+)
+```
+
+Calling the model evaluates:
+
+```julia
+yhat = backbone(x)
+y = projection_layer(yhat)
+```
+
+Only the neural network backbone has trainable parameters. The projection layer is differentiable but has no trainable weights.
+
+---
+
+### `constrained_model(backbone, example_input) do dm ... end`
+
+Creates a `DisjunctiveModel` automatically by inferring the output dimension from the neural network.
+
+```julia
+model = constrained_model(backbone, x0; formulation = :cnf) do dm
+    set_bounds!(dm, lower = zeros(2), upper = ones(2))
+    add_linear_constraint!(dm, [1.0, 1.0], :>=, 0.8)
+end
+```
+
+This is the most convenient API for Flux users.
 
 ---
 
@@ -197,7 +603,9 @@ layer_partial = DisjunctiveProjectionLayer(
 
 ## Full Flux example
 
-The following example builds a small neural network, adds a disjunctive projection layer, runs one training step, and performs inference on a single sample.
+The following example builds a small neural network, defines a disjunctive rule set, compares `:dnf`, `:cnf`, and `:partial_dnf` projections on the same raw neural network output, runs one training step, and performs inference on a single sample.
+
+The same script is available under [`examples/flux_end2end.jl`](examples/flux_end2end.jl).
 
 ```julia
 using Flux
@@ -217,12 +625,101 @@ x = Float32[0.2, 0.7, 0.4]
 target = Float32[0.8, 0.2]
 
 # -----------------------------
-# 2. Build the constrained model
+# 2. Build the disjunctive rule model
 # -----------------------------
 
-model = constrained_model(
-    backbone,
-    x;
+dm = DisjunctiveModel(2)
+
+set_bounds!(
+    dm,
+    lower = [0.0, 0.0],
+    upper = [1.0, 1.0],
+)
+
+# Global constraint:
+# y1 + y2 >= 0.8
+add_linear_constraint!(dm, [1.0, 1.0], :>=, 0.8)
+
+# Rule 1 has three disjuncts:
+# y1 <= 0.2 OR 0.4 <= y1 <= 0.6 OR y1 >= 0.8
+add_disjunction!(
+    dm,
+    [LinearConstraint([1.0, 0.0], :<=, 0.2)],
+    [
+        LinearConstraint([1.0, 0.0], :>=, 0.4),
+        LinearConstraint([1.0, 0.0], :<=, 0.6),
+    ],
+    [LinearConstraint([1.0, 0.0], :>=, 0.8)];
+    name = :x_rule,
+)
+
+# Rule 2 has three disjuncts:
+# y2 <= 0.2 OR 0.35 <= y2 <= 0.55 OR y2 >= 0.7
+add_disjunction!(
+    dm,
+    [LinearConstraint([0.0, 1.0], :<=, 0.2)],
+    [
+        LinearConstraint([0.0, 1.0], :>=, 0.35),
+        LinearConstraint([0.0, 1.0], :<=, 0.55),
+    ],
+    [LinearConstraint([0.0, 1.0], :>=, 0.7)];
+    name = :y_rule,
+)
+
+# -----------------------------
+# 3. Inspect the model and formulations
+# -----------------------------
+
+println()
+println("=== User-facing disjunctive model ===")
+print_model(dm)
+
+println()
+println("=== DNF lifted formulation ===")
+print_projection_model(dm; formulation = :dnf)
+
+println()
+println("=== CNF lifted formulation ===")
+print_projection_model(dm; formulation = :cnf)
+
+println()
+println("=== Partial-DNF lifted formulation ===")
+print_projection_model(
+    dm;
+    formulation = :partial_dnf,
+    num_dnf_rules = 1,
+    rule_ordering = [:x_rule, :y_rule],
+)
+
+# -----------------------------
+# 4. Compare DNF, CNF, and partial-DNF on the same NN output
+# -----------------------------
+
+yhat = backbone(x)
+
+println()
+println("Raw NN output yhat = ", yhat)
+
+dnf_layer = DisjunctiveProjectionLayer(
+    dm;
+    formulation = :dnf,
+    y_regularization = 1e-4,
+    ycopy_regularization = 1e-4,
+    gamma_regularization = 1e-4,
+    anchor_regularization = 1e-4,
+)
+
+cnf_layer = DisjunctiveProjectionLayer(
+    dm;
+    formulation = :cnf,
+    y_regularization = 1e-4,
+    ycopy_regularization = 1e-4,
+    gamma_regularization = 1e-4,
+    anchor_regularization = 1e-4,
+)
+
+partial_layer = DisjunctiveProjectionLayer(
+    dm;
     formulation = :partial_dnf,
     num_dnf_rules = 1,
     rule_ordering = [:x_rule, :y_rule],
@@ -230,67 +727,54 @@ model = constrained_model(
     ycopy_regularization = 1e-4,
     gamma_regularization = 1e-4,
     anchor_regularization = 1e-4,
-) do dm
+)
 
-    set_bounds!(
-        dm,
-        lower = [0.0, 0.0],
-        upper = [1.0, 1.0],
-    )
+y_dnf = dnf_layer(yhat)
+y_cnf = cnf_layer(yhat)
+y_partial = partial_layer(yhat)
 
-    # Global constraint:
-    # y1 + y2 >= 0.8
-    add_linear_constraint!(dm, [1.0, 1.0], :>=, 0.8)
+println()
+println("=== Projected predictions for the same sample ===")
+println("DNF projection         = ", y_dnf, "  sum = ", sum(y_dnf))
+println("CNF projection         = ", y_cnf, "  sum = ", sum(y_cnf))
+println("Partial-DNF projection = ", y_partial, "  sum = ", sum(y_partial))
 
-    # Rule 1 has three disjuncts:
-    # y1 <= 0.2 OR 0.4 <= y1 <= 0.6 OR y1 >= 0.8
-    add_disjunction!(
-        dm,
-        [LinearConstraint([1.0, 0.0], :<=, 0.2)],
-        [
-            LinearConstraint([1.0, 0.0], :>=, 0.4),
-            LinearConstraint([1.0, 0.0], :<=, 0.6),
-        ],
-        [LinearConstraint([1.0, 0.0], :>=, 0.8)];
-        name = :x_rule,
-    )
-
-    # Rule 2 has three disjuncts:
-    # y2 <= 0.2 OR 0.35 <= y2 <= 0.55 OR y2 >= 0.7
-    add_disjunction!(
-        dm,
-        [LinearConstraint([0.0, 1.0], :<=, 0.2)],
-        [
-            LinearConstraint([0.0, 1.0], :>=, 0.35),
-            LinearConstraint([0.0, 1.0], :<=, 0.55),
-        ],
-        [LinearConstraint([0.0, 1.0], :>=, 0.7)];
-        name = :y_rule,
-    )
-end
+println()
+println("The three projections can differ because :dnf, :cnf, and :partial_dnf")
+println("construct different convexified relaxations of the same logical rule set.")
 
 # -----------------------------
-# 3. Inspect the projection layer
+# 5. Build a trainable constrained Flux model
 # -----------------------------
 
-print_projection_model(
-    model.layer.model;
+# Here we train the partial-DNF constrained model.
+# The projection layer is differentiable, but it has no trainable parameters.
+# Flux only trains the neural network backbone.
+model = constrained_model(
+    backbone,
+    dm;
     formulation = :partial_dnf,
     num_dnf_rules = 1,
     rule_ordering = [:x_rule, :y_rule],
+    y_regularization = 1e-4,
+    ycopy_regularization = 1e-4,
+    gamma_regularization = 1e-4,
+    anchor_regularization = 1e-4,
 )
 
 # -----------------------------
-# 4. Forward pass
+# 6. Forward pass
 # -----------------------------
 
 y = model(x)
 
+println()
+println("=== Forward pass through constrained model ===")
 println("Projected prediction = ", y)
 println("Feasibility check: y1 + y2 = ", sum(y))
 
 # -----------------------------
-# 5. One training step
+# 7. One training step
 # -----------------------------
 
 loss(m, x, target) = sum(abs2, m(x) .- target)
@@ -303,19 +787,22 @@ end
 
 Flux.update!(opt, model, grads[1])
 
+println()
 println("Training loss before update = ", l)
 
 # -----------------------------
-# 6. Inference after one update
+# 8. Inference after one update
 # -----------------------------
 
 y_after = model(x)
 
+println()
+println("=== Inference after one update ===")
 println("Projected prediction after one update = ", y_after)
 println("Feasibility check after update: y1 + y2 = ", sum(y_after))
 ```
 
-The user never has to write an adjoint or reverse pass. The constrained model is a Flux-compatible layer.
+The user never has to write an adjoint or reverse pass. The constrained model is a Flux-compatible model.
 
 ---
 
@@ -368,6 +855,7 @@ Run examples from the package root:
 julia --project=. examples/01_basic_dnf_cnf_partial.jl
 julia --project=. examples/02_comprehensive_formulations.jl
 julia --project=. examples/03_large_scale_comparison.jl
+julia --project=. examples/flux_end2end.jl
 ```
 
 ---
@@ -379,15 +867,29 @@ julia --project=. examples/03_large_scale_comparison.jl
 - A modified DiffOpt with regularized KKT solves is recommended for robust reverse differentiation.
 - Full DNF can grow exponentially in the number of disjunctions.
 - Partial-DNF is intended to trade off formulation strength and computational size.
+- The package currently targets Flux.jl as the main neural network interface.
 
 ---
 
-## Roadmap
+## Citation
 
-Planned improvements:
+If you use this package in your research, please cite:
 
-- JuMP-style constraint input, so users can write `y[1] + y[2] <= 1.0`.
-- Better rule ordering heuristics for partial-DNF.
-- MILP baseline projection mode.
-- Upstreaming the regularized KKT solve into DiffOpt.
-- More examples and benchmark scripts.
+```bibtex
+@inproceedings{
+anonymous2026disjunctivenet,
+title={DisjunctiveNet: Neural Symbolic Learning via Differentiable Convexified Optimization Layers},
+author={Anonymous},
+booktitle={Forty-third International Conference on Machine Learning},
+year={2026},
+url={https://openreview.net/forum?id=c88GPpURN8}
+}
+```
+
+Once the paper is de-anonymized, the author field will be updated.
+
+---
+
+## License
+
+This package is released under the MIT License. See [`LICENSE`](LICENSE) for details.

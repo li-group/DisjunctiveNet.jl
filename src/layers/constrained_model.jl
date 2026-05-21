@@ -1,3 +1,5 @@
+using Functors
+
 """
     ConstrainedFluxModel(backbone, layer)
 
@@ -21,8 +23,10 @@ function (model::ConstrainedFluxModel)(x)
     return model.layer(yhat)
 end
 
-Flux.@layer ConstrainedFluxModel
+Flux.trainable(model::ConstrainedFluxModel) = (backbone = model.backbone,)
 
+Functors.children(model::ConstrainedFluxModel) = (backbone = model.backbone,)
+Functors.functor(::Type{<:ConstrainedFluxModel}, model) = ((backbone = model.backbone,), children -> ConstrainedFluxModel(children.backbone, model.layer))
 
 """
     constrained_model(backbone, disjunctive_model)

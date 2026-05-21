@@ -1,4 +1,5 @@
 using Flux
+using Functors
 
 """
     Flux.trainable(layer::DisjunctiveProjectionLayer)
@@ -9,7 +10,6 @@ The neural network backbone is trainable; the projection layer is a
 deterministic differentiable map.
 """
 Flux.trainable(layer::DisjunctiveProjectionLayer) = NamedTuple()
+Functors.children(layer::DisjunctiveProjectionLayer) = NamedTuple()
 
-# Register the projection layer with Flux so it behaves like a standard layer
-# inside `Chain`.
-Flux.@layer DisjunctiveProjectionLayer
+Functors.functor(::Type{<:DisjunctiveProjectionLayer}, layer) = (NamedTuple(), _ -> layer)
