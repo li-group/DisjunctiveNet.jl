@@ -39,6 +39,13 @@ function _constraint_string(c::LinearConstraint)
     return "$(_linear_expr_string(c.a)) $(_sense_string(c.sense)) $(c.b)"
 end
 
+function _scaled_constraint_string(c::LinearConstraint, gamma_name::AbstractString)
+    lhs = _linear_expr_string(c.a)
+    sense = _sense_string(c.sense)
+    rhs = "$(c.b) * $(gamma_name)"
+    return "$(lhs) $(sense) $(rhs)"
+end
+
 
 """
     print_model(model::DisjunctiveModel; io = stdout)
@@ -107,7 +114,7 @@ function print_hull(hull::ConvexHullForm; io::IO = stdout)
         println(io, "    none")
     else
         for (i, c) in enumerate(hull.global_constraints)
-            println(io, "    g[$i,s]: $(_constraint_string(c)) scaled by gamma[s]")
+            println(io, "    g[$i,s]: $(_scaled_constraint_string(c, "gamma[s]"))")
         end
     end
 
@@ -118,7 +125,7 @@ function print_hull(hull::ConvexHullForm; io::IO = stdout)
             println(io, "      local constraints: none")
         else
             for (q, c) in enumerate(scenario.local_constraints)
-                println(io, "      c[$q,s]: $(_constraint_string(c)) scaled by gamma[$s]")
+                println(io, "      c[$q,s]: $(_scaled_constraint_string(c, "gamma[$s]"))")
             end
         end
     end
@@ -148,7 +155,7 @@ function print_hull(hull::CNFConvexHullForm; io::IO = stdout)
         println(io, "    none")
     else
         for (i, c) in enumerate(hull.global_constraints)
-            println(io, "    g[$i]: $(_constraint_string(c))")
+            println(io, "        g[$i,d]: $(_scaled_constraint_string(c, "gamma[d]"))")
         end
     end
 
@@ -162,7 +169,7 @@ function print_hull(hull::CNFConvexHullForm; io::IO = stdout)
             println(io, "      disjunct[$d]:")
             println(io, "        bounds and global constraints copied with gamma[$d]")
             for (q, c) in enumerate(disjunct)
-                println(io, "        c[$q]: $(_constraint_string(c)) scaled by gamma[$d]")
+                println(io, "        c[$q]: $(_scaled_constraint_string(c, "gamma[$d]"))")
             end
         end
     end
@@ -227,7 +234,7 @@ function print_hull(hull::PartialDNFHullForm; io::IO = stdout)
             println(io, "      none")
         else
             for (i, c) in enumerate(hull.global_constraints)
-                println(io, "      g[$i,s]: $(_constraint_string(c)) scaled by gamma_dnf[s]")
+                println(io, "      g[$i,s]: $(_scaled_constraint_string(c, "gamma_dnf[s]"))")
             end
         end
 
@@ -238,7 +245,7 @@ function print_hull(hull::PartialDNFHullForm; io::IO = stdout)
                 println(io, "        local constraints: none")
             else
                 for (q, c) in enumerate(scenario.local_constraints)
-                    println(io, "        c[$q,s]: $(_constraint_string(c)) scaled by gamma_dnf[$s]")
+                    println(io, "        c[$q,s]: $(_scaled_constraint_string(c, "gamma_dnf[$s]"))")
                 end
             end
         end
@@ -258,7 +265,7 @@ function print_hull(hull::PartialDNFHullForm; io::IO = stdout)
                 println(io, "        none")
             else
                 for (i, c) in enumerate(hull.global_constraints)
-                    println(io, "        g[$i,d]: $(_constraint_string(c)) scaled by gamma[d]")
+                    println(io, "        g[$i,d]: $(_scaled_constraint_string(c, "gamma[d]"))")
                 end
             end
 
@@ -268,7 +275,7 @@ function print_hull(hull::PartialDNFHullForm; io::IO = stdout)
                     println(io, "        local constraints: none")
                 else
                     for (q, c) in enumerate(disjunct)
-                        println(io, "        c[$q]: $(_constraint_string(c)) scaled by gamma[$d]")
+                        println(io, "        c[$q]: $(_scaled_constraint_string(c, "gamma[$d]"))")
                     end
                 end
             end
@@ -315,4 +322,204 @@ function print_projection_model(
     end
 
     return nothing
+end
+
+"""
+    count_constraints(model::JuMP.Model)
+
+Return the total number of constraints in a JuMP model.
+"""
+function count_constraints(model::JuMP.Model)
+    total = 0
+
+    for (F, S) in JuMP.list_of_constraint_types(model)
+        total += JuMP.num_constraints(model, F, S)
+    end
+
+    return total
+end
+
+
+"""
+    model_size(model::JuMP.Model)
+
+Return a named tuple with the number of variables and constraints in a JuMP model.
+"""
+function model_size(model::JuMP.Model)
+    return (
+        variables = JuMP.num_variables(model),
+        constraints = count_constraints(model),
+    )
+end
+
+
+"""
+    product_disjunct_count(counts)
+
+Return the full-DNF scenario count implied by a vector of disjunct counts.
+"""
+product_disjunct_count(counts::AbstractVector{<:Integer}) = prod(counts)
+
+
+"""
+    formulation_summary(model; formulation = :dnf, num_dnf_rules = -1, rule_ordering = nothing)
+
+Return a lightweight summary of the lifted formulation size before building the JuMP model.
+"""
+function formulation_summary(
+    model::DisjunctiveModel;
+    formulation::Symbol = :dnf,
+    num_dnf_rules::Int = -1,
+    rule_ordering = nothing,
+    prune_infeasible::Bool = false,
+)
+    if formulation == :dnf
+        hull = convex_hull_form(model; prune_infeasible = prune_infeasible)
+
+        return (
+            formulation = :dnf,
+            scenarios = num_scenarios(hull),
+            cnf_blocks = 0,
+            dnf_rules = length(hull.scenarios) == 0 ? 0 : length(hull.scenarios[1].choices),
+        )
+
+    elseif formulation == :cnf
+        hull = cnf_hull_form(model)
+
+        return (
+            formulation = :cnf,
+            scenarios = 0,
+            cnf_blocks = num_blocks(hull),
+            dnf_rules = 0,
+        )
+
+    elseif formulation == :partial_dnf
+        hull = partial_dnf_hull_form(
+            model;
+            ordering = rule_ordering,
+            num_dnf_rules = num_dnf_rules,
+        )
+
+        return (
+            formulation = :partial_dnf,
+            scenarios = length(hull.dnf_scenarios),
+            cnf_blocks = length(hull.cnf_blocks),
+            dnf_rules = length(hull.dnf_indices),
+        )
+
+    else
+        throw(ArgumentError("Unknown formulation $(formulation). Expected :dnf, :cnf, or :partial_dnf."))
+    end
+end
+
+
+"""
+    benchmark_projection(model, yhat; formulation, label, kwargs...)
+
+Build and solve a projection model, printing formulation size, build time,
+solve time, variable count, and constraint count.
+
+This is intended for examples and debugging.
+"""
+function benchmark_projection(
+    dm::DisjunctiveModel,
+    yhat;
+    formulation::Symbol,
+    label::AbstractString,
+    num_dnf_rules::Int = -1,
+    rule_ordering = nothing,
+    solver = nothing,
+    y_regularization::Real = 0.0,
+    ycopy_regularization::Real = 1e-8,
+    gamma_regularization::Real = 1e-8,
+    anchor_regularization::Real = 1e-3,
+    run::Bool = true,
+    io::IO = stdout,
+)
+    if !run
+        println(io, rpad(label, 20), " skipped")
+        return nothing
+    end
+
+    hull =
+        if formulation == :dnf
+            convex_hull_form(dm; prune_infeasible = false)
+        elseif formulation == :cnf
+            cnf_hull_form(dm)
+        elseif formulation == :partial_dnf
+            partial_dnf_hull_form(
+                dm;
+                ordering = rule_ordering,
+                num_dnf_rules = num_dnf_rules,
+            )
+        else
+            throw(ArgumentError("Unknown formulation $(formulation)."))
+        end
+
+    summary =
+        if formulation == :dnf
+            "scenarios=$(num_scenarios(hull))"
+        elseif formulation == :cnf
+            "blocks=$(num_blocks(hull))"
+        else
+            "dnf_scenarios=$(length(hull.dnf_scenarios)), cnf_blocks=$(length(hull.cnf_blocks))"
+        end
+
+    println(io, rpad(label, 20), " building model... ", summary)
+
+    model_ref = Ref{JuMP.Model}()
+
+    build_time = @elapsed begin
+        model_ref[] = build_projection_model(
+            hull,
+            yhat;
+            solver = solver,
+            y_regularization = y_regularization,
+            ycopy_regularization = ycopy_regularization,
+            gamma_regularization = gamma_regularization,
+            anchor_regularization = anchor_regularization,
+        )
+    end
+
+    jump_model = model_ref[]
+    sz = model_size(jump_model)
+
+    println(
+        io,
+        rpad(label, 20),
+        " built in ", round(build_time; digits = 4), "s",
+        " vars=", sz.variables,
+        " cons=", sz.constraints,
+        ". solving...",
+    )
+
+    solve_time = @elapsed begin
+        optimize!(jump_model)
+    end
+
+    status = termination_status(jump_model)
+
+    y =
+        status == MOI.OPTIMAL ?
+        Float64.(value.(jump_model[:y])) :
+        Float64.(collect(yhat))
+
+    println(
+        io,
+        rpad(label, 20),
+        " status=", status,
+        " build=", round(build_time; digits = 4), "s",
+        " solve=", round(solve_time; digits = 4), "s",
+        " total=", round(build_time + solve_time; digits = 4), "s",
+        " vars=", sz.variables,
+        " cons=", sz.constraints,
+        " y=", round.(y; digits = 5),
+    )
+
+    return ProjectionResult(
+        y,
+        haskey(jump_model.obj_dict, :gamma) ? Float64.(value.(jump_model[:gamma])) : Float64[],
+        status,
+        jump_model,
+    )
 end

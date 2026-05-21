@@ -4,6 +4,7 @@ include("core/types.jl")
 include("core/utils.jl")
 
 include("modeling/modeling.jl")
+include("modeling/jump_conversion.jl")
 include("modeling/standard_form.jl")
 
 include("formulations/convex_hull.jl")
@@ -44,6 +45,8 @@ export add_linear_constraint!
 export add_disjunction!
 export linear_constraints
 export disjunctions
+export output_variables
+export linear_constraint_from_jump
 
 export standard_form
 export convex_hull_form
@@ -60,5 +63,11 @@ export projection_formulation
 export print_model
 export print_hull
 export print_projection_model
+
+export count_constraints
+export model_size
+export product_disjunct_count
+export formulation_summary
+export benchmark_projection
 
 end

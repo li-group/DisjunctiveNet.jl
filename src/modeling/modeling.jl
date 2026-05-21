@@ -90,6 +90,25 @@ function add_linear_constraint!(
     return constraint
 end
 
+"""
+    add_linear_constraint!(model, constraint)
+
+Add a JuMP-style scalar affine constraint to a `DisjunctiveModel`.
+
+Example:
+
+    y = output_variables(dm)
+    add_linear_constraint!(dm, y[1] + y[2] <= 1.0)
+"""
+function add_linear_constraint!(
+    dm::DisjunctiveModel,
+    constraint::JuMP.ScalarConstraint,
+)
+    lc = linear_constraint_from_jump(dm, constraint)
+    push!(dm.constraints, lc)
+    return lc
+end
+
 
 """
     add_disjunction!(model, disjuncts...; name = nothing)
@@ -128,6 +147,19 @@ function add_disjunction!(
     return disjunction
 end
 
+function _convert_jump_disjunct(dm::DisjunctiveModel, disjunct::Vector{<:JuMP.ScalarConstraint},)
+    return [linear_constraint_from_jump(dm, c) for c in disjunct]
+end
+
+
+function add_disjunction!(
+    dm::DisjunctiveModel,
+    disjuncts::Vector{<:JuMP.ScalarConstraint}...;
+    name::Union{Nothing, Symbol} = nothing,
+)
+    converted = [_convert_jump_disjunct(dm, disjunct) for disjunct in disjuncts]
+    return add_disjunction!(dm, converted...; name = name)
+end
 
 """
     linear_constraints(model)
@@ -143,3 +175,10 @@ linear_constraints(model::DisjunctiveModel) = copy(model.constraints)
 Return disjunctive constraints.
 """
 disjunctions(model::DisjunctiveModel) = copy(model.disjunctions)
+
+"""
+    output_variables(model)
+
+Return the JuMP variables used for JuMP-style constraint construction.
+"""
+output_variables(dm::DisjunctiveModel) = dm.y

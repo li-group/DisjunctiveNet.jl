@@ -1,3 +1,5 @@
+using JuMP
+
 """
     ProjectionConfig(; mode = :dnf_qp, gradient = :diffopt, solver = nothing)
 
@@ -119,9 +121,17 @@ mutable struct DisjunctiveModel
     disjunctions::Vector{Disjunction}
     metadata::Dict{Symbol, Any}
 
+    jump_model::JuMP.Model
+    y::Vector{JuMP.VariableRef}
+
     function DisjunctiveModel(n_outputs::Integer)
-        n_outputs > 0 || throw(ArgumentError("n_outputs must be positive."))
         n = Int(n_outputs)
+        n > 0 || throw(ArgumentError("n_outputs must be positive."))
+
+        jump_model = JuMP.Model()
+        JuMP.set_silent(jump_model)
+        @variable(jump_model, y[1:n])
+
         return new(
             n,
             fill(-Inf, n),
@@ -129,6 +139,8 @@ mutable struct DisjunctiveModel
             LinearConstraint[],
             Disjunction[],
             Dict{Symbol, Any}(),
+            jump_model,
+            collect(y),
         )
     end
 end

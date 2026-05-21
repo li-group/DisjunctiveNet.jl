@@ -75,3 +75,64 @@
     @test occursin("scenario[1]", str)
     @test occursin("block[1]", str)
 end
+
+@testset "Display and benchmark utilities" begin
+    dm = DisjunctiveModel(2)
+    set_bounds!(dm, lower = [0.0, 0.0], upper = [1.0, 1.0])
+
+    add_disjunction!(
+        dm,
+        [LinearConstraint([1.0, 0.0], :<=, 0.25)],
+        [LinearConstraint([1.0, 0.0], :>=, 0.75)];
+        name = :x_split,
+    )
+
+    add_disjunction!(
+        dm,
+        [LinearConstraint([0.0, 1.0], :<=, 0.25)],
+        [LinearConstraint([0.0, 1.0], :>=, 0.75)];
+        name = :y_split,
+    )
+
+    @test product_disjunct_count([2, 2, 3]) == 12
+
+    dnf_summary = formulation_summary(dm; formulation = :dnf)
+    @test dnf_summary.formulation == :dnf
+    @test dnf_summary.scenarios == 4
+
+    cnf_summary = formulation_summary(dm; formulation = :cnf)
+    @test cnf_summary.formulation == :cnf
+    @test cnf_summary.cnf_blocks == 2
+
+    partial_summary = formulation_summary(
+        dm;
+        formulation = :partial_dnf,
+        num_dnf_rules = 1,
+        rule_ordering = [:x_split, :y_split],
+    )
+    @test partial_summary.formulation == :partial_dnf
+    @test partial_summary.scenarios == 2
+    @test partial_summary.cnf_blocks == 1
+
+    result = project(dm, [0.5, 0.5]; formulation = :cnf)
+    sz = model_size(result.model)
+
+    @test sz.variables > 0
+    @test sz.constraints > 0
+
+    buf = IOBuffer()
+    bench_result = benchmark_projection(
+        dm,
+        [0.5, 0.5];
+        formulation = :cnf,
+        label = "CNF",
+        io = buf,
+    )
+
+    output = String(take!(buf))
+
+    @test bench_result.status == MOI.OPTIMAL
+    @test occursin("CNF", output)
+    @test occursin("vars=", output)
+    @test occursin("cons=", output)
+end

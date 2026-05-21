@@ -14,4 +14,5 @@ import MathOptInterface as MOI
     include("test_flux.jl")
     include("test_display.jl")
     include("test_stress.jl")
+    include("test_jump_conversion.jl")
 end
