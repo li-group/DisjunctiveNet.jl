@@ -16,6 +16,7 @@ include("backend/differentiation.jl")
 
 include("layers/projection_layer.jl")
 include("layers/flux.jl")
+include("layers/constrained_model.jl")
 
 include("display/display.jl")
 
@@ -59,6 +60,8 @@ export ProjectionResult
 export project
 export build_projection_model
 export projection_formulation
+export ConstrainedFluxModel
+export constrained_model
 
 export print_model
 export print_hull

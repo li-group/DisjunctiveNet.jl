@@ -1,15 +1,20 @@
 using JuMP
 import MathOptInterface as MOI
 
+function _term_coefficient_variable(term)
+    if term isa Tuple
+        return term[1], term[2]
+    else
+        return term.coefficient, term.variable
+    end
+end
+
 """
     linear_constraint_from_jump(model, constraint)
 
 Convert a JuMP scalar affine constraint into a `LinearConstraint`.
 """
-function linear_constraint_from_jump(
-    dm::DisjunctiveModel,
-    constraint::JuMP.ScalarConstraint,
-)
+function linear_constraint_from_jump(dm::DisjunctiveModel, constraint::JuMP.ScalarConstraint)
     func = constraint.func
     set = constraint.set
 
@@ -20,10 +25,9 @@ function linear_constraint_from_jump(
     a = zeros(Float64, dm.n_outputs)
 
     for term in JuMP.linear_terms(func)
-        coeff = Float64(term.coefficient)
-        var = term.variable
+        coeff, var = _term_coefficient_variable(term)
         idx = _output_variable_index(dm, var)
-        a[idx] += coeff
+        a[idx] += Float64(coeff)
     end
 
     constant = Float64(JuMP.constant(func))
