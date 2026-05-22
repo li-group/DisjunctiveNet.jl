@@ -1,6 +1,6 @@
-# DisjunctiveDifferentiableLayers.jl
+# DisjunctiveNet.jl
 
-`DisjunctiveDifferentiableLayers.jl` provides differentiable projection layers for neural networks whose outputs must satisfy mixed logical-linear constraints.
+`DisjunctiveNet.jl` provides differentiable projection layers for neural networks whose outputs must satisfy mixed logical-linear constraints.
 
 The package lets users define constraints of the form
 
@@ -53,14 +53,14 @@ Until the DiffOpt patch is upstreamed, install the modified DiffOpt first:
 using Pkg
 
 Pkg.add(url = "https://github.com/ShramanPal/DiffOpt.jl")
-Pkg.add(url = "https://github.com/ShramanPal/DisjunctiveDifferentiableLayers.jl")
+Pkg.add(url = "https://github.com/ShramanPal/DisjunctiveNet.jl")
 ```
 
 For local development:
 
 ```bash
-git clone https://github.com/ShramanPal/DisjunctiveDifferentiableLayers.jl
-cd DisjunctiveDifferentiableLayers.jl
+git clone https://github.com/ShramanPal/DisjunctiveNet.jl
+cd DisjunctiveNet.jl
 julia --project=.
 ```
 

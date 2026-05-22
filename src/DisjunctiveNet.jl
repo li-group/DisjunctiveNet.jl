@@ -1,4 +1,4 @@
-module DisjunctiveDifferentiableLayers
+module DisjunctiveNet
 
 include("core/types.jl")
 include("core/utils.jl")

@@ -1,11 +1,11 @@
 using Test
-using DisjunctiveDifferentiableLayers
+using DisjunctiveNet
 using JuMP
 using Flux
 using Zygote
 import MathOptInterface as MOI
 
-@testset "DisjunctiveDifferentiableLayers.jl" begin
+@testset "DisjunctiveNet.jl" begin
     include("test_modeling.jl")
     include("test_standard_form.jl")
     include("test_hulls.jl")

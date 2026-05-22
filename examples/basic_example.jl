@@ -1,7 +1,7 @@
 using Pkg
 Pkg.activate(joinpath(@__DIR__, ".."))
 
-using DisjunctiveDifferentiableLayers
+using DisjunctiveNet
 import MathOptInterface as MOI
 
 println("=== Basic disjunctive projection example ===")

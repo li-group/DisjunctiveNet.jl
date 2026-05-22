@@ -1,6 +1,6 @@
 using Flux
 using Zygote
-using DisjunctiveDifferentiableLayers
+using DisjunctiveNet
 
 # -----------------------------
 # 1. Build a neural network

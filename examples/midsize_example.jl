@@ -1,7 +1,7 @@
 using Pkg
 Pkg.activate(joinpath(@__DIR__, ".."))
 
-using DisjunctiveDifferentiableLayers
+using DisjunctiveNet
 using Gurobi
 import MathOptInterface as MOI
 
